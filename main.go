@@ -2,17 +2,31 @@ package main
 
 import (
 	"context"
+	"embed"
 	"encoding/json"
 	"fmt"
-	"log"
+	"html/template"
+	"log/slog"
+	"net/http"
 	"os"
+	"runtime/debug"
 	"time"
 
+	"github.com/apex/gateway/v2"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 	"google.golang.org/api/calendar/v3"
 	"google.golang.org/api/option"
 )
+
+//go:embed templates
+var tmpl embed.FS
+
+//go:embed credentials.json
+var credentialsData []byte
+
+//go:embed token.json
+var tokenData []byte
 
 type CalendarConfig struct {
 	GoogleCalendarID  string            `json:"google_calendar_id"`
@@ -50,73 +64,270 @@ type WeekStats struct {
 	Days        []DayStats
 }
 
+type PageData struct {
+	Now            time.Time
+	ChosenDate     time.Time
+	Previous       time.Time
+	Next           time.Time
+	Bookings       []Booking
+	DailyStats     []DayStats
+	WeeklyStats    []WeekStats
+	Config         UtilizationConfig
+	Version        string
+	CalendarID     string
+	TotalBookings  int
+	TotalHours     float64
+	AvgUtilization float64
+}
+
 func main() {
-	// Load configuration
-	config := loadCalendarConfig()
+	commit, _ := GitCommit()
 
-	// Create OAuth2 config
-	ctx := context.Background()
-	credentials, err := os.ReadFile(config.CredentialsFile)
+	t, err := template.New("base").Funcs(template.FuncMap{
+		"formatTime": func(t time.Time) string {
+			if t.Hour() == 0 && t.Minute() == 0 {
+				return t.Format("Mon Jan 2 (all day)")
+			}
+			return t.Format("Mon Jan 2 15:04")
+		},
+		"formatDate": func(t time.Time) string {
+			return t.Format("Mon Jan 2")
+		},
+		"formatWeek": func(t time.Time) string {
+			return t.Format("Jan 2")
+		},
+		"roundFloat": func(f float64) string {
+			return fmt.Sprintf("%.1f", f)
+		},
+		"utilizationClass": func(utilization float64) string {
+			if utilization >= 80.0 {
+				return "utilization-high"
+			} else if utilization >= 50.0 {
+				return "utilization-medium"
+			}
+			return "utilization-low"
+		},
+	}).ParseFS(tmpl, "templates/*.html")
+
 	if err != nil {
-		log.Fatalf("Unable to read credentials file: %v", err)
+		slog.Error("Failed to parse templates", "error", err)
+		return
 	}
 
-	oauthConfig, err := google.ConfigFromJSON(credentials, calendar.CalendarReadonlyScope)
-	if err != nil {
-		log.Fatalf("Unable to parse client secret file to config: %v", err)
+	http.HandleFunc("/", func(rw http.ResponseWriter, r *http.Request) {
+		chosenDate := time.Now()
+		inputDate := r.URL.Query().Get("date")
+		if inputDate != "" {
+			if parsed, err := time.Parse("2006-01-02", inputDate); err == nil {
+				chosenDate = parsed
+			}
+		}
+
+		// Load configuration
+		config := loadCalendarConfig()
+
+		// Get calendar data with timeout
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		// Create a channel for the result
+		resultChan := make(chan struct {
+			bookings    []Booking
+			dailyStats  []DayStats
+			weeklyStats []WeekStats
+			err         error
+		}, 1)
+
+		// Run calendar data retrieval in a goroutine
+		go func() {
+			bookings, dailyStats, weeklyStats, err := getCalendarData(config, chosenDate)
+			resultChan <- struct {
+				bookings    []Booking
+				dailyStats  []DayStats
+				weeklyStats []WeekStats
+				err         error
+			}{bookings, dailyStats, weeklyStats, err}
+		}()
+
+		// Wait for result or timeout
+		var bookings []Booking
+		var dailyStats []DayStats
+		var weeklyStats []WeekStats
+		var err error
+
+		select {
+		case result := <-resultChan:
+			bookings = result.bookings
+			dailyStats = result.dailyStats
+			weeklyStats = result.weeklyStats
+			err = result.err
+		case <-ctx.Done():
+			err = fmt.Errorf("calendar data retrieval timed out after 10 seconds")
+		}
+
+		if err != nil {
+			slog.Error("Failed to get calendar data", "error", err)
+			// Return a user-friendly error page instead of 500
+			rw.Header().Set("Content-Type", "text/html")
+			errorPage := fmt.Sprintf(`
+<!DOCTYPE html>
+<html>
+<head><title>Calendar Error</title></head>
+<body style="font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px;">
+    <h1>🎾 Cardinham Tennis Utilization</h1>
+    <div style="background: #f8d7da; border: 1px solid #f5c6cb; padding: 15px; border-radius: 5px; color: #721c24;">
+        <h3>Unable to load calendar data</h3>
+        <p><strong>Error:</strong> %s</p>
+        <p>This could be due to:</p>
+        <ul>
+            <li>Missing or invalid credentials.json</li>
+            <li>Missing or invalid token.json</li>
+            <li>Network connectivity issues</li>
+            <li>Google Calendar API rate limits</li>
+        </ul>
+        <p>Please check the server logs for more details.</p>
+    </div>
+    <p><small>Generated at %s</small></p>
+</body>
+</html>`, err.Error(), time.Now().Format("2006-01-02 15:04:05"))
+			rw.WriteHeader(http.StatusOK) // Use 200 instead of 500 for better UX
+			rw.Write([]byte(errorPage))
+			return
+		}
+
+		// Calculate summary statistics
+		totalBookings := len(bookings)
+		var totalHours float64
+		var totalUtilization float64
+		utilizationCount := 0
+
+		for _, day := range dailyStats {
+			totalHours += day.TotalHours
+			totalUtilization += day.Utilization
+			utilizationCount++
+		}
+
+		var avgUtilization float64
+		if utilizationCount > 0 {
+			avgUtilization = totalUtilization / float64(utilizationCount)
+		}
+
+		pageData := PageData{
+			Now:            time.Now(),
+			ChosenDate:     chosenDate,
+			Previous:       chosenDate.AddDate(0, 0, -7),
+			Next:           chosenDate.AddDate(0, 0, 7),
+			Bookings:       bookings,
+			DailyStats:     dailyStats,
+			WeeklyStats:    weeklyStats,
+			Config:         config.UtilizationConfig,
+			Version:        commit,
+			CalendarID:     config.GoogleCalendarID,
+			TotalBookings:  totalBookings,
+			TotalHours:     totalHours,
+			AvgUtilization: avgUtilization,
+		}
+
+		rw.Header().Set("Content-Type", "text/html")
+		err = t.ExecuteTemplate(rw, "index.html", pageData)
+		if err != nil {
+			slog.Error("Failed to execute templates", "error", err)
+			http.Error(rw, "Internal server error", http.StatusInternalServerError)
+		}
+	})
+
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
+
+	if _, ok := os.LookupEnv("AWS_LAMBDA_FUNCTION_NAME"); ok {
+		err = gateway.ListenAndServe("", nil)
+	} else {
+		slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, nil)))
+		port := os.Getenv("PORT")
+		if port == "" {
+			port = "8080"
+		}
+		err = http.ListenAndServe(fmt.Sprintf(":%s", port), nil)
 	}
 
-	// Load or create token
-	tok := loadCalendarToken(config.TokenFile, oauthConfig, ctx)
+	slog.Error("error listening", "error", err)
+}
+
+func getCalendarData(config CalendarConfig, chosenDate time.Time) ([]Booking, []DayStats, []WeekStats, error) {
+	slog.Info("Starting calendar data retrieval", "calendar_id", config.GoogleCalendarID, "start_date", chosenDate)
+
+	// Check if credentials data is available
+	if len(credentialsData) == 0 {
+		return nil, nil, nil, fmt.Errorf("credentials.json not found or empty. Please ensure credentials.json is available in the project root")
+	}
+	slog.Info("Credentials data loaded", "size", len(credentialsData))
+
+	// Create OAuth2 config from embedded credentials
+	oauthConfig, err := google.ConfigFromJSON(credentialsData, calendar.CalendarReadonlyScope)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("unable to parse client secret file to config: %v", err)
+	}
+	slog.Info("OAuth2 config created successfully")
+
+	// Check if token data is available
+	if len(tokenData) == 0 {
+		return nil, nil, nil, fmt.Errorf("token.json not found or empty. Please ensure token.json is available in the project root")
+	}
+	slog.Info("Token data loaded", "size", len(tokenData))
+
+	// Load token from embedded data
+	var tok oauth2.Token
+	if err := json.Unmarshal(tokenData, &tok); err != nil {
+		return nil, nil, nil, fmt.Errorf("unable to parse token: %v", err)
+	}
+	slog.Info("Token parsed successfully", "expiry", tok.Expiry)
 
 	// Create calendar service
-	srv, err := calendar.NewService(ctx, option.WithHTTPClient(oauthConfig.Client(ctx, tok)))
+	ctx := context.Background()
+	srv, err := calendar.NewService(ctx, option.WithHTTPClient(oauthConfig.Client(ctx, &tok)))
 	if err != nil {
-		log.Fatalf("Unable to retrieve Calendar client: %v", err)
+		return nil, nil, nil, fmt.Errorf("unable to retrieve Calendar client: %v", err)
 	}
+	slog.Info("Calendar service created successfully")
 
-	// Get events for the next 30 days
-	now := time.Now()
-	endTime := now.AddDate(0, 0, 30)
+	// Get events for the next 30 days from chosen date
+	startTime := chosenDate
+	endTime := startTime.AddDate(0, 0, 30)
+	slog.Info("Fetching calendar events", "start", startTime, "end", endTime)
 
 	events, err := srv.Events.List(config.GoogleCalendarID).
 		ShowDeleted(false).
 		SingleEvents(true).
 		OrderBy("startTime").
-		TimeMin(now.Format(time.RFC3339)).
+		TimeMin(startTime.Format(time.RFC3339)).
 		TimeMax(endTime.Format(time.RFC3339)).
 		MaxResults(100).
 		Do()
 
 	if err != nil {
-		log.Fatalf("Unable to retrieve events: %v", err)
+		return nil, nil, nil, fmt.Errorf("unable to retrieve events: %v", err)
 	}
-
-	fmt.Printf("Calendar Analysis for the next 30 days:\n")
-	fmt.Printf("Calendar: %s\n", config.GoogleCalendarID)
-	fmt.Printf("Found %d events\n\n", len(events.Items))
-
-	if len(events.Items) == 0 {
-		fmt.Println("No upcoming events found.")
-		return
-	}
+	slog.Info("Calendar events retrieved", "count", len(events.Items))
 
 	// Parse events into bookings
 	bookings := parseBookings(events.Items)
+	slog.Info("Bookings parsed", "count", len(bookings))
 
-	// Display individual bookings with hours
-	displayBookings(bookings)
+	// Calculate statistics
+	var dailyStats []DayStats
+	var weeklyStats []WeekStats
 
-	// Calculate and display utilization statistics
 	if config.UtilizationConfig.ShowDailyStats {
-		dailyStats := calculateDailyStats(bookings, config.UtilizationConfig)
-		displayDailyStats(dailyStats, config.UtilizationConfig)
+		dailyStats = calculateDailyStats(bookings, config.UtilizationConfig)
+		slog.Info("Daily stats calculated", "count", len(dailyStats))
 	}
 
 	if config.UtilizationConfig.ShowWeeklyStats {
-		weeklyStats := calculateWeeklyStats(bookings, config.UtilizationConfig)
-		displayWeeklyStats(weeklyStats, config.UtilizationConfig)
+		weeklyStats = calculateWeeklyStats(bookings, config.UtilizationConfig)
+		slog.Info("Weekly stats calculated", "count", len(weeklyStats))
 	}
+
+	slog.Info("Calendar data retrieval completed successfully")
+	return bookings, dailyStats, weeklyStats, nil
 }
 
 func parseBookings(events []*calendar.Event) []Booking {
@@ -166,20 +377,6 @@ func parseBookings(events []*calendar.Event) []Booking {
 	}
 
 	return bookings
-}
-
-func displayBookings(bookings []Booking) {
-	fmt.Printf("=== Individual Bookings ===\n")
-	for _, booking := range bookings {
-		timeStr := booking.StartTime.Format("Mon Jan 2 15:04")
-		if booking.StartTime.Hour() == 0 && booking.StartTime.Minute() == 0 {
-			timeStr = booking.StartTime.Format("Mon Jan 2 (all day)")
-		}
-
-		hours := booking.Duration.Hours()
-		fmt.Printf("%s - %s (%.1f hours)\n", timeStr, booking.Title, hours)
-	}
-	fmt.Println()
 }
 
 func calculateDailyStats(bookings []Booking, config UtilizationConfig) []DayStats {
@@ -251,20 +448,6 @@ func calculateBookingHoursInRange(booking Booking, startHour, endHour int) float
 	return hours
 }
 
-func displayDailyStats(dailyStats []DayStats, config UtilizationConfig) {
-	hoursPerDay := config.EndHour - config.StartHour
-	fmt.Printf("=== Daily Utilization Statistics ===\n")
-	fmt.Printf("Operating Hours: %d:00 - %d:00 (%d hours/day)\n\n", config.StartHour, config.EndHour, hoursPerDay)
-
-	for _, day := range dailyStats {
-		fmt.Printf("%s: %.1f hours (%.1f%% utilization)\n",
-			day.Date.Format("Mon Jan 2"),
-			day.TotalHours,
-			day.Utilization)
-	}
-	fmt.Println()
-}
-
 func calculateWeeklyStats(bookings []Booking, config UtilizationConfig) []WeekStats {
 	// Group bookings by week
 	weekMap := make(map[string][]Booking)
@@ -315,31 +498,6 @@ func getWeekStart(date time.Time) time.Time {
 		daysToSubtract += 7
 	}
 	return date.AddDate(0, 0, -daysToSubtract)
-}
-
-func displayWeeklyStats(weeklyStats []WeekStats, config UtilizationConfig) {
-	hoursPerDay := config.EndHour - config.StartHour
-	hoursPerWeek := 7 * hoursPerDay
-	fmt.Printf("=== Weekly Utilization Statistics ===\n")
-	fmt.Printf("Operating Hours: %d:00 - %d:00 (%d hours/day, %d hours/week)\n\n",
-		config.StartHour, config.EndHour, hoursPerDay, hoursPerWeek)
-
-	for _, week := range weeklyStats {
-		fmt.Printf("Week of %s - %s: %.1f hours (%.1f%% utilization)\n",
-			week.WeekStart.Format("Jan 2"),
-			week.WeekEnd.Format("Jan 2"),
-			week.TotalHours,
-			week.Utilization)
-
-		// Show daily breakdown for this week
-		for _, day := range week.Days {
-			fmt.Printf("  %s: %.1f hours (%.1f%%)\n",
-				day.Date.Format("Mon Jan 2"),
-				day.TotalHours,
-				day.Utilization)
-		}
-		fmt.Println()
-	}
 }
 
 func loadCalendarConfig() CalendarConfig {
@@ -409,45 +567,18 @@ func loadCalendarConfig() CalendarConfig {
 	}
 }
 
-func loadCalendarToken(tokenFile string, config *oauth2.Config, ctx context.Context) *oauth2.Token {
-	// Try to load existing token
-	if _, err := os.Stat(tokenFile); err == nil {
-		f, err := os.Open(tokenFile)
-		if err == nil {
-			defer f.Close()
-			tok := &oauth2.Token{}
-			if err := json.NewDecoder(f).Decode(tok); err == nil {
-				return tok
-			}
+func GitCommit() (commit string, dirty bool) {
+	bi, ok := debug.ReadBuildInfo()
+	if !ok {
+		return "", false
+	}
+	for _, setting := range bi.Settings {
+		switch setting.Key {
+		case "vcs.modified":
+			dirty = setting.Value == "true"
+		case "vcs.revision":
+			commit = setting.Value
 		}
 	}
-
-	// If no token exists, get a new one
-	authURL := config.AuthCodeURL("state-token", oauth2.AccessTypeOffline)
-	fmt.Printf("Go to the following link in your browser:\n%v\n\n", authURL)
-	fmt.Print("Enter the authorization code: ")
-
-	var authCode string
-	if _, err := fmt.Scan(&authCode); err != nil {
-		log.Fatalf("Unable to read authorization code: %v", err)
-	}
-
-	tok, err := config.Exchange(ctx, authCode)
-	if err != nil {
-		log.Fatalf("Unable to retrieve token from web: %v", err)
-	}
-
-	// Save the token for future use
-	saveCalendarToken(tokenFile, tok)
-	return tok
-}
-
-func saveCalendarToken(path string, token *oauth2.Token) {
-	fmt.Printf("Saving credential file to: %s\n", path)
-	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0600)
-	if err != nil {
-		log.Fatalf("Unable to cache oauth token: %v", err)
-	}
-	defer f.Close()
-	json.NewEncoder(f).Encode(token)
+	return
 }

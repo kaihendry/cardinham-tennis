@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cardinham Tennis Utilization</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .header {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        .nav {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+        .nav a {
+            text-decoration: none;
+            color: #007bff;
+            padding: 8px 16px;
+            border: 1px solid #007bff;
+            border-radius: 4px;
+            transition: all 0.2s;
+        }
+        .nav a:hover {
+            background: #007bff;
+            color: white;
+        }
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        .stat-card {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .stat-card h3 {
+            margin: 0 0 10px 0;
+            color: #333;
+        }
+        .stat-value {
+            font-size: 2em;
+            font-weight: bold;
+            color: #007bff;
+        }
+        .section {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        .section h2 {
+            margin-top: 0;
+            color: #333;
+            border-bottom: 2px solid #007bff;
+            padding-bottom: 10px;
+        }
+        .booking-item {
+            padding: 10px;
+            border-left: 4px solid #007bff;
+            background: #f8f9fa;
+            margin-bottom: 10px;
+            border-radius: 0 4px 4px 0;
+        }
+        .day-stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+        }
+        .day-stat {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 6px;
+            border-left: 4px solid #28a745;
+        }
+        .utilization-high { border-left-color: #28a745; }
+        .utilization-medium { border-left-color: #ffc107; }
+        .utilization-low { border-left-color: #dc3545; }
+        .week-stat {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 6px;
+            margin-bottom: 15px;
+            border-left: 4px solid #007bff;
+        }
+        .week-days {
+            margin-top: 10px;
+            padding-left: 20px;
+        }
+        .week-day {
+            padding: 5px 0;
+            border-bottom: 1px solid #dee2e6;
+        }
+        .week-day:last-child {
+            border-bottom: none;
+        }
+        .footer {
+            text-align: center;
+            color: #6c757d;
+            font-size: 0.9em;
+            margin-top: 40px;
+        }
+        .config-info {
+            background: #e9ecef;
+            padding: 10px;
+            border-radius: 4px;
+            font-size: 0.9em;
+            color: #495057;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🎾 Cardinham Tennis Utilization</h1>
+        <div class="config-info">
+            Calendar: {{.CalendarID}} | Operating Hours: {{.Config.StartHour}}:00 - {{.Config.EndHour}}:00
+        </div>
+    </div>
+
+    <div class="nav">
+        <a href="?date={{.Previous.Format "2006-01-02"}}">← Previous Week</a>
+        <span><strong>{{.ChosenDate.Format "January 2, 2006"}}</strong></span>
+        <a href="?date={{.Next.Format "2006-01-02"}}">Next Week →</a>
+    </div>
+
+    <div class="stats-grid">
+        <div class="stat-card">
+            <h3>Total Bookings</h3>
+            <div class="stat-value">{{.TotalBookings}}</div>
+        </div>
+        <div class="stat-card">
+            <h3>Total Hours</h3>
+            <div class="stat-value">{{roundFloat .TotalHours}}</div>
+        </div>
+        <div class="stat-card">
+            <h3>Average Utilization</h3>
+            <div class="stat-value">{{roundFloat .AvgUtilization}}%</div>
+        </div>
+    </div>
+
+    {{if .Bookings}}
+    <div class="section">
+        <h2>📅 Individual Bookings</h2>
+        {{range .Bookings}}
+        <div class="booking-item">
+            <strong>{{.Title}}</strong><br>
+            <small>{{formatTime .StartTime}} ({{roundFloat .Duration.Hours}} hours)</small>
+        </div>
+        {{end}}
+    </div>
+    {{end}}
+
+    {{if .DailyStats}}
+    <div class="section">
+        <h2>📊 Daily Utilization Statistics</h2>
+        <div class="day-stats">
+            {{range .DailyStats}}
+            <div class="day-stat {{utilizationClass .Utilization}}">
+                <strong>{{formatDate .Date}}</strong><br>
+                <strong>{{roundFloat .TotalHours}} hours</strong> ({{roundFloat .Utilization}}% utilization)<br>
+                <small>{{len .Bookings}} bookings</small>
+            </div>
+            {{end}}
+        </div>
+    </div>
+    {{end}}
+
+    {{if .WeeklyStats}}
+    <div class="section">
+        <h2>📈 Weekly Utilization Statistics</h2>
+        {{range .WeeklyStats}}
+        <div class="week-stat">
+            <strong>Week of {{formatWeek .WeekStart}} - {{formatWeek .WeekEnd}}</strong><br>
+            <strong>{{roundFloat .TotalHours}} hours</strong> ({{roundFloat .Utilization}}% utilization)
+            <div class="week-days">
+                {{range .Days}}
+                <div class="week-day">
+                    {{formatDate .Date}}: {{roundFloat .TotalHours}} hours ({{roundFloat .Utilization}}%)
+                </div>
+                {{end}}
+            </div>
+        </div>
+        {{end}}
+    </div>
+    {{end}}
+
+    <div class="footer">
+        <p>Generated at {{.Now.Format "2006-01-02 15:04:05"}} | Version: {{.Version}}</p>
+    </div>
+</body>
+</html> 

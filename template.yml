@@ -1,0 +1,60 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+
+Parameters:
+  DomainName:
+    Type: String
+  ACMCertificateArn:
+    Type: String
+
+Resources:
+  RecordsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TimeToLiveSpecification:
+        Enabled: true
+        AttributeName: expires
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+        - AttributeName: created
+          AttributeType: N
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+        - AttributeName: created
+          KeyType: RANGE
+      BillingMode: PAY_PER_REQUEST
+
+  Gateway:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      Domain:
+        DomainName: !Ref DomainName
+        CertificateArn: !Ref ACMCertificateArn
+
+  MainFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Architectures:
+        - arm64
+      CodeUri: .
+      Handler: main
+      Runtime: provided.al2
+      Policies: AmazonDynamoDBFullAccess
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref RecordsTable
+      Events:
+        CatchAll:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Gateway
+            Path: /{proxy+}
+            Method: ANY
+    Metadata:
+      BuildMethod: makefile
+
+Outputs:
+  GatewayEndPoint:
+    Value: !Sub "https://${Gateway}.execute-api.${AWS::Region}.amazonaws.com/"

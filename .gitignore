@@ -1,2 +1,6 @@
+gin-bin
 .envrc
 *.json
+test-build
+simple_calendar_tool
+.aws-sam
