@@ -24,28 +24,42 @@ jobs:
       - name: Validate JSON secrets
         run: |
           echo "Validating GOOGLE_CREDENTIALS_FILE secret..."
+          echo "=== Secret content analysis ==="
+          echo "Length: $(echo -n "${{ secrets.GOOGLE_CREDENTIALS_FILE }}" | wc -c) characters"
+          echo "First 10 characters (hex): $(echo -n "${{ secrets.GOOGLE_CREDENTIALS_FILE }}" | head -c 10 | xxd -p)"
+          echo "First 50 characters:"
+          echo -n "${{ secrets.GOOGLE_CREDENTIALS_FILE }}" | head -c 50 | cat -A
+          echo ""
+          echo "Last 50 characters:"
+          echo -n "${{ secrets.GOOGLE_CREDENTIALS_FILE }}" | tail -c 50 | cat -A
+          echo ""
+          echo "=== Attempting JSON validation ==="
           echo "${{ secrets.GOOGLE_CREDENTIALS_FILE }}" | python3 -m json.tool > /dev/null
           if [ $? -eq 0 ]; then
             echo "✓ GOOGLE_CREDENTIALS_FILE is valid JSON"
           else
             echo "✗ GOOGLE_CREDENTIALS_FILE is NOT valid JSON"
-            echo "First 500 characters of the secret:"
-            echo "${{ secrets.GOOGLE_CREDENTIALS_FILE }}" | head -c 500
-            echo ""
             echo "JSON validation error:"
             echo "${{ secrets.GOOGLE_CREDENTIALS_FILE }}" | python3 -m json.tool
             exit 1
           fi
           
           echo "Validating GOOGLE_TOKEN_FILE secret..."
+          echo "=== Secret content analysis ==="
+          echo "Length: $(echo -n "${{ secrets.GOOGLE_TOKEN_FILE }}" | wc -c) characters"
+          echo "First 10 characters (hex): $(echo -n "${{ secrets.GOOGLE_TOKEN_FILE }}" | head -c 10 | xxd -p)"
+          echo "First 50 characters:"
+          echo -n "${{ secrets.GOOGLE_TOKEN_FILE }}" | head -c 50 | cat -A
+          echo ""
+          echo "Last 50 characters:"
+          echo -n "${{ secrets.GOOGLE_TOKEN_FILE }}" | tail -c 50 | cat -A
+          echo ""
+          echo "=== Attempting JSON validation ==="
           echo "${{ secrets.GOOGLE_TOKEN_FILE }}" | python3 -m json.tool > /dev/null
           if [ $? -eq 0 ]; then
             echo "✓ GOOGLE_TOKEN_FILE is valid JSON"
           else
             echo "✗ GOOGLE_TOKEN_FILE is NOT valid JSON"
-            echo "First 500 characters of the secret:"
-            echo "${{ secrets.GOOGLE_TOKEN_FILE }}" | head -c 500
-            echo ""
             echo "JSON validation error:"
             echo "${{ secrets.GOOGLE_TOKEN_FILE }}" | python3 -m json.tool
             exit 1
