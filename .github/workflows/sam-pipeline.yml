@@ -21,8 +21,62 @@ jobs:
         with:
           role-to-assume: arn:aws:iam::407461997746:role/github-actions-Role-56IHHM969DKJ
           aws-region: eu-west-2
+      - name: Validate JSON secrets
+        run: |
+          echo "Validating GOOGLE_CREDENTIALS_FILE secret..."
+          echo "${{ secrets.GOOGLE_CREDENTIALS_FILE }}" | python3 -m json.tool > /dev/null
+          if [ $? -eq 0 ]; then
+            echo "✓ GOOGLE_CREDENTIALS_FILE is valid JSON"
+          else
+            echo "✗ GOOGLE_CREDENTIALS_FILE is NOT valid JSON"
+            echo "First 500 characters of the secret:"
+            echo "${{ secrets.GOOGLE_CREDENTIALS_FILE }}" | head -c 500
+            echo ""
+            echo "JSON validation error:"
+            echo "${{ secrets.GOOGLE_CREDENTIALS_FILE }}" | python3 -m json.tool
+            exit 1
+          fi
+          
+          echo "Validating GOOGLE_TOKEN_FILE secret..."
+          echo "${{ secrets.GOOGLE_TOKEN_FILE }}" | python3 -m json.tool > /dev/null
+          if [ $? -eq 0 ]; then
+            echo "✓ GOOGLE_TOKEN_FILE is valid JSON"
+          else
+            echo "✗ GOOGLE_TOKEN_FILE is NOT valid JSON"
+            echo "First 500 characters of the secret:"
+            echo "${{ secrets.GOOGLE_TOKEN_FILE }}" | head -c 500
+            echo ""
+            echo "JSON validation error:"
+            echo "${{ secrets.GOOGLE_TOKEN_FILE }}" | python3 -m json.tool
+            exit 1
+          fi
       - name: Create Google credentials files
         run: |
           echo -n "${{ secrets.GOOGLE_CREDENTIALS_FILE }}" > credentials.json
           echo -n "${{ secrets.GOOGLE_TOKEN_FILE }}" > token.json
+      - name: Debug credential files
+        run: |
+          echo "=== Credentials file size ==="
+          ls -la credentials.json
+          echo "=== Token file size ==="
+          ls -la token.json
+          echo "=== Credentials file first 200 chars ==="
+          head -c 200 credentials.json
+          echo ""
+          echo "=== Token file first 200 chars ==="
+          head -c 200 token.json
+          echo ""
+          echo "=== Testing JSON validity ==="
+          if python3 -m json.tool credentials.json > /dev/null 2>&1; then
+            echo "✓ credentials.json is valid JSON"
+          else
+            echo "✗ credentials.json is NOT valid JSON"
+            python3 -m json.tool credentials.json
+          fi
+          if python3 -m json.tool token.json > /dev/null 2>&1; then
+            echo "✓ token.json is valid JSON"
+          else
+            echo "✗ token.json is NOT valid JSON"
+            python3 -m json.tool token.json
+          fi
       - run: make deploy
