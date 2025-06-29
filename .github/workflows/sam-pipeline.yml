@@ -23,6 +23,6 @@ jobs:
           aws-region: eu-west-2
       - name: Create Google credentials files
         run: |
-          echo "${{ secrets.GOOGLE_CREDENTIALS_FILE }}" > credentials.json
-          echo "${{ secrets.GOOGLE_TOKEN_FILE }}" > token.json
+          echo -n "${{ secrets.GOOGLE_CREDENTIALS_FILE }}" > credentials.json
+          echo -n "${{ secrets.GOOGLE_TOKEN_FILE }}" > token.json
       - run: make deploy

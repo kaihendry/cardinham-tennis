@@ -261,6 +261,13 @@ func getCalendarData(config CalendarConfig, chosenDate time.Time) ([]Booking, []
 	}
 	slog.Info("Credentials data loaded", "size", len(credentialsData))
 
+	// Debug: Log the first 200 characters of credentials data to help debug parsing issues
+	credsPreview := string(credentialsData)
+	if len(credsPreview) > 200 {
+		credsPreview = credsPreview[:200] + "..."
+	}
+	slog.Info("Credentials data preview", "preview", credsPreview)
+
 	// Create OAuth2 config from embedded credentials
 	oauthConfig, err := google.ConfigFromJSON(credentialsData, calendar.CalendarReadonlyScope)
 	if err != nil {
@@ -273,6 +280,13 @@ func getCalendarData(config CalendarConfig, chosenDate time.Time) ([]Booking, []
 		return nil, nil, nil, fmt.Errorf("token.json not found or empty. Please ensure token.json is available in the project root")
 	}
 	slog.Info("Token data loaded", "size", len(tokenData))
+
+	// Debug: Log the first 200 characters of token data to help debug parsing issues
+	tokenPreview := string(tokenData)
+	if len(tokenPreview) > 200 {
+		tokenPreview = tokenPreview[:200] + "..."
+	}
+	slog.Info("Token data preview", "preview", tokenPreview)
 
 	// Load token from embedded data
 	var tok oauth2.Token
