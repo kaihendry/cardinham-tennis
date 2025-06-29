@@ -9,12 +9,9 @@ ACMCERTIFICATEARN = arn:aws:acm:eu-west-2:407461997746:certificate/9083a66b-72b6
 
 deploy:
 	sam build
-	sam deploy --no-progressbar --resolve-s3 --stack-name $(STACK) --parameter-overrides DomainName=$(DOMAINNAME) ACMCertificateArn=$(ACMCERTIFICATEARN) --no-confirm-changeset --no-fail-on-empty-changeset --capabilities CAPABILITY_IAM --disable-rollback
+	sam deploy --no-progressbar --resolve-s3 --stack-name $(STACK) --parameter-overrides DomainName=$(DOMAINNAME) ACMCertificateArn=$(ACMCERTIFICATEARN) GoogleCredentialsFile="$${GOOGLE_CREDENTIALS_FILE}" GoogleTokenFile="$${GOOGLE_TOKEN_FILE}" --no-confirm-changeset --no-fail-on-empty-changeset --capabilities CAPABILITY_IAM --disable-rollback
 
 build-MainFunction:
-	@echo "Checking for required files..."
-	@if [ ! -f credentials.json ]; then echo "ERROR: credentials.json not found. Please create this file with your Google OAuth2 credentials."; exit 1; fi
-	@if [ ! -f token.json ]; then echo "ERROR: token.json not found. Please create this file with your Google OAuth2 token."; exit 1; fi
 	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags "-X main.Version=$(VERSION)" -o ${ARTIFACTS_DIR}/bootstrap
 
 validate:

@@ -6,6 +6,10 @@ Parameters:
     Type: String
   ACMCertificateArn:
     Type: String
+  GoogleCredentialsFile:
+    Type: String
+  GoogleTokenFile:
+    Type: String
 
 Resources:
   RecordsTable:
@@ -45,6 +49,8 @@ Resources:
       Environment:
         Variables:
           TABLE_NAME: !Ref RecordsTable
+          GOOGLE_CREDENTIALS_FILE: !Ref GoogleCredentialsFile
+          GOOGLE_TOKEN_FILE: !Ref GoogleTokenFile
       Events:
         CatchAll:
           Type: HttpApi

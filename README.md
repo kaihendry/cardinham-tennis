@@ -23,3 +23,15 @@ Public calendar for members to see when courts are free.
 ## Web Application
 
 A Go web application that downloads and parses the Google Calendar ICS feed to show real-time court availability with booking details.
+
+## Deployment
+
+This application is deployed to AWS Lambda using GitHub Actions. To deploy:
+
+1. Set up GitHub repository secrets:
+   - `GOOGLE_CREDENTIALS_FILE`: The contents of your Google OAuth2 credentials.json file
+   - `GOOGLE_TOKEN_FILE`: The contents of your Google OAuth2 token.json file
+
+2. Push to the `main` branch or manually trigger the workflow from the Actions tab
+
+The application will automatically build and deploy to AWS Lambda with the configured domain.
