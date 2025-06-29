@@ -255,45 +255,28 @@ func main() {
 func getCalendarData(config CalendarConfig, chosenDate time.Time) ([]Booking, []DayStats, []WeekStats, error) {
 	slog.Info("Starting calendar data retrieval", "calendar_id", config.GoogleCalendarID, "start_date", chosenDate)
 
-	// Try to get credentials from environment variables first, then fall back to embedded files
-	var credentialsBytes []byte
-	var tokenBytes []byte
-
-	// Check for credentials in environment variables
-	if credsEnv := os.Getenv("GOOGLE_CREDENTIALS_FILE"); credsEnv != "" {
-		credentialsBytes = []byte(credsEnv)
-		slog.Info("Using credentials from environment variable")
-	} else if len(credentialsData) > 0 {
-		credentialsBytes = credentialsData
-		slog.Info("Using embedded credentials data")
-	} else {
-		return nil, nil, nil, fmt.Errorf("no credentials available. Please set GOOGLE_CREDENTIALS_FILE environment variable or ensure credentials.json is embedded")
+	// Check if credentials data is available
+	if len(credentialsData) == 0 {
+		return nil, nil, nil, fmt.Errorf("credentials.json not found or empty. Please ensure credentials.json is available in the project root")
 	}
+	slog.Info("Credentials data loaded", "size", len(credentialsData))
 
-	// Check for token in environment variables
-	if tokenEnv := os.Getenv("GOOGLE_TOKEN_FILE"); tokenEnv != "" {
-		tokenBytes = []byte(tokenEnv)
-		slog.Info("Using token from environment variable")
-	} else if len(tokenData) > 0 {
-		tokenBytes = tokenData
-		slog.Info("Using embedded token data")
-	} else {
-		return nil, nil, nil, fmt.Errorf("no token available. Please set GOOGLE_TOKEN_FILE environment variable or ensure token.json is embedded")
-	}
-
-	slog.Info("Credentials data loaded", "size", len(credentialsBytes))
-	slog.Info("Token data loaded", "size", len(tokenBytes))
-
-	// Create OAuth2 config from credentials
-	oauthConfig, err := google.ConfigFromJSON(credentialsBytes, calendar.CalendarReadonlyScope)
+	// Create OAuth2 config from embedded credentials
+	oauthConfig, err := google.ConfigFromJSON(credentialsData, calendar.CalendarReadonlyScope)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("unable to parse client secret file to config: %v", err)
 	}
 	slog.Info("OAuth2 config created successfully")
 
-	// Load token from data
+	// Check if token data is available
+	if len(tokenData) == 0 {
+		return nil, nil, nil, fmt.Errorf("token.json not found or empty. Please ensure token.json is available in the project root")
+	}
+	slog.Info("Token data loaded", "size", len(tokenData))
+
+	// Load token from embedded data
 	var tok oauth2.Token
-	if err := json.Unmarshal(tokenBytes, &tok); err != nil {
+	if err := json.Unmarshal(tokenData, &tok); err != nil {
 		return nil, nil, nil, fmt.Errorf("unable to parse token: %v", err)
 	}
 	slog.Info("Token parsed successfully", "expiry", tok.Expiry)

@@ -34,4 +34,4 @@ This application is deployed to AWS Lambda using GitHub Actions. To deploy:
 
 2. Push to the `main` branch or manually trigger the workflow from the Actions tab
 
-The application will automatically build and deploy to AWS Lambda with the configured domain.
+The application will automatically create the credential files during build and deploy to AWS Lambda with the configured domain.
