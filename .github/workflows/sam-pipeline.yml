@@ -23,13 +23,13 @@ jobs:
           aws-region: eu-west-2
       - name: Create and validate JSON secrets
         run: |
-          echo "${{ secrets.GOOGLE_CREDENTIALS_FILE }}" > credentials.json
+          echo '${{ secrets.GOOGLE_CREDENTIALS_FILE }}' > credentials.json
           if ! jq -e . credentials.json >/dev/null; then
             echo "Error: credentials.json is not a valid JSON file!"
             exit 1
           fi
           echo "credentials.json is valid."
-          echo "${{ secrets.GOOGLE_TOKEN_FILE }}" > token.json
+          echo '${{ secrets.GOOGLE_TOKEN_FILE }}' > token.json
           if ! jq -e . token.json >/dev/null; then
             echo "Error: token.json is not a valid JSON file!"
             exit 1
