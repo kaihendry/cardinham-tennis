@@ -7,7 +7,7 @@ toolchain go1.24.4
 require (
 	github.com/apex/gateway/v2 v2.0.0
 	golang.org/x/oauth2 v0.30.0
-	google.golang.org/api v0.241.0
+	google.golang.org/api v0.242.0
 )
 
 require (
